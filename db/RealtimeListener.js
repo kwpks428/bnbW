@@ -71,6 +71,27 @@ class RealtimeListener {
         }
     }
 
+    async initializeWithoutConnectionManager() {
+        try {
+            console.log('🔄 初始化即時數據監聽器（使用現有連接管理器）...');
+            
+            // 設置 WebSocket 重連回調
+            this.connectionManager.setWebSocketReconnectCallback(() => {
+                console.log('🔄 [RealtimeListener] WebSocket 重連成功，重新設置事件監聽器');
+                this.reattachBlockchainEvents();
+            });
+            
+            this.provider = this.connectionManager.getWebSocketProvider();
+            this.contract = this.connectionManager.getWebSocketContract();
+            this.initializeWebSocketServer();
+            this.setupBlockchainEvents();
+            console.log('🚀 即時數據監聽器初始化成功');
+        } catch (error) {
+            console.error('❌ 即時數據監聽器初始化失敗:', error);
+            throw error;
+        }
+    }
+
     initializeWebSocketServer() {
         if (!this.server) {
             console.error('❌ HTTP server instance not provided to RealtimeListener.');

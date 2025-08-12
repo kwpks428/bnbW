@@ -13,16 +13,19 @@ class ConnectionManager {
         ConnectionManager.instance = this;
 
         this.dbConfig = {
-            // Railway PostgreSQL 配置
-            connectionString: process.env.DATABASE_URL || 'postgresql://postgres:YOUR_PASSWORD_HERE@shortline.proxy.rlwy.net:18595/railway',
-            max: 20,
-            min: 5,
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 10000,
+            // PostgreSQL 配置
+            connectionString: process.env.DATABASE_URL,
+            max: 10,                        // 減少最大連接數，避免超過限制
+            min: 2,                         // 減少最小連接數
+            idleTimeoutMillis: 60000,       // 增加空閒超時時間到 60 秒
+            connectionTimeoutMillis: 15000, // 增加連接超時時間到 15 秒
+            acquireTimeoutMillis: 20000,    // 增加獲取連接超時時間
             maxUses: 7500,
             allowExitOnIdle: false,
+            keepAlive: true,                // 啟用 keep-alive
+            keepAliveInitialDelayMillis: 10000,
             ssl: {
-                rejectUnauthorized: false // Railway PostgreSQL 需要SSL但允許自簽證書
+                rejectUnauthorized: false   // PostgreSQL 需要SSL但允許自簽證書
             }
         };
 
@@ -266,13 +269,48 @@ class ConnectionManager {
     }
 
     async getDatabaseConnection() {
-        if (!this.connections.dbPool || !this.status.dbConnected) throw new Error('Database pool not initialized or connection failed');
-        try {
-            return await this.connections.dbPool.connect();
-        } catch (error) {
-            console.error('❌ [ConnectionManager] Failed to get database connection:', error.message);
-            this.status.dbConnected = false;
-            throw error;
+        console.log(`🔍 [ConnectionManager] getDatabaseConnection - dbPool: ${!!this.connections.dbPool}, dbConnected: ${this.status.dbConnected}`);
+        
+        // 如果資料庫連接池不存在或連接狀態為 false，嘗試重新初始化
+        if (!this.connections.dbPool || !this.status.dbConnected) {
+            console.warn('⚠️ [ConnectionManager] 資料庫連接池未初始化或連接失敗，嘗試重新初始化...');
+            try {
+                await this.initializeDatabasePool();
+                console.log('✅ [ConnectionManager] 資料庫連接池重新初始化成功');
+            } catch (reinitError) {
+                console.error('❌ [ConnectionManager] 資料庫連接池重新初始化失敗:', reinitError.message);
+                throw new Error('Database pool not initialized or connection failed');
+            }
+        }
+        
+        // 嘗試獲取連接，如果失敗則重試
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const client = await this.connections.dbPool.connect();
+                console.log(`✅ [ConnectionManager] 成功獲取資料庫連接 (嘗試 ${attempt}/3)`);
+                return client;
+            } catch (error) {
+                console.error(`❌ [ConnectionManager] 獲取資料庫連接失敗 (嘗試 ${attempt}/3):`, error.message);
+                this.status.dbConnected = false;
+                
+                if (attempt === 3) {
+                    // 最後一次嘗試失敗，拋出錯誤
+                    throw new Error(`Failed to get database connection after 3 attempts: ${error.message}`);
+                }
+                
+                // 等待後重試
+                console.log(`⏳ [ConnectionManager] 等待 ${attempt * 1000}ms 後重試...`);
+                await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                
+                // 如果不是最後一次嘗試，重新初始化連接池
+                if (attempt < 3) {
+                    try {
+                        await this.initializeDatabasePool();
+                    } catch (reinitError) {
+                        console.error('❌ [ConnectionManager] 重試時重新初始化失敗:', reinitError.message);
+                    }
+                }
+            }
         }
     }
 

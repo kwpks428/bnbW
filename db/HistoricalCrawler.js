@@ -51,6 +51,18 @@ class HistoricalCrawler {
         }
     }
 
+    async initializeWithoutConnectionManager() {
+        try {
+            console.log('🔄 初始化歷史數據抓取器（使用現有連接管理器）...');
+            this.provider = this.connectionManager.getHttpProvider();
+            this.contract = this.connectionManager.getContract();
+            console.log('🚀 歷史數據抓取器初始化成功');
+        } catch (error) {
+            console.error('❌ 歷史數據抓取器初始化失敗:', error);
+            throw error;
+        }
+    }
+
     start() {
         console.log('🚀 啟動雙線歷史數據抓取架構...');
         this.startMainLine();

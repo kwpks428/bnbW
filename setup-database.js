@@ -5,11 +5,16 @@ require('dotenv').config();
 
 async function setupDatabase() {
     const pool = new Pool({
-        connectionString: process.env.DATABASE_URL || 'postgresql://postgres:abAFmBOywGJJVErlSEMvMqsFfJEiaWSW@shortline.proxy.rlwy.net:18595/railway',
+        connectionString: process.env.DATABASE_URL,
         ssl: {
             rejectUnauthorized: false
         }
     });
+
+    if (!process.env.DATABASE_URL) {
+        console.error('❌ DATABASE_URL 環境變數未設置');
+        process.exit(1);
+    }
 
     try {
         console.log('🔄 連接到 Railway PostgreSQL 數據庫...');

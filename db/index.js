@@ -19,11 +19,24 @@ async function startServer() {
     try {
         console.log('🚀 正在啟動應用程式...');
 
+        // 首先初始化 ConnectionManager（單例模式，確保只初始化一次）
+        console.log('🔧 正在初始化連接管理器...');
+        await ConnectionManager.initialize();
+        console.log('✅ 連接管理器初始化完成');
+
         // Initialize services
         const historicalCrawler = new HistoricalCrawler();
         const realtimeListener = new RealtimeListener();
 
-        await historicalCrawler.initialize();
+        // 初始化服務（不再重複初始化 ConnectionManager）
+        console.log('🔧 正在初始化歷史數據抓取器...');
+        await historicalCrawler.initializeWithoutConnectionManager();
+        console.log('✅ 歷史數據抓取器初始化完成');
+        // 初始化即時監聽器（不再重複初始化 ConnectionManager）
+        console.log('🔧 正在初始化即時監聽器...');
+        await realtimeListener.initializeWithoutConnectionManager();
+        console.log('✅ 即時監聽器初始化完成');
+
         // API endpoint for status
         app.get('/api/status', (req, res) => {
             res.json({
@@ -39,7 +52,6 @@ async function startServer() {
         });
 
         realtimeListener.setServer(server);
-        await realtimeListener.initialize();
 
         // Start background workers
         historicalCrawler.start();
