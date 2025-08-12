@@ -1,0 +1,12 @@
+# 只保留資料庫相關檔案，忽略其他所有檔案
+
+# 忽略所有檔案
+*
+
+# 但保留資料庫相關檔案
+!init-database.sql
+!setup-database.js
+!db/
+!db/**
+!.gitignore
+!README.md
