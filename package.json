@@ -1,0 +1,31 @@
+{
+  "name": "bnb-historical-crawler",
+  "version": "1.0.0",
+  "description": "BNB 預測遊戲歷史數據抓取服務",
+  "main": "HistoricalCrawler.js",
+  "scripts": {
+    "start": "node HistoricalCrawler.js",
+    "dev": "nodemon HistoricalCrawler.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "ethers": "^6.8.0",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "blockchain",
+    "ethereum",
+    "binance",
+    "prediction",
+    "historical",
+    "crawler"
+  ],
+  "author": "BNB Prediction Team",
+  "license": "MIT"
+}
