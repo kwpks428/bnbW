@@ -581,13 +581,29 @@ if (require.main === module) {
             }
             
             if (req.url === '/health' && req.method === 'GET') {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({
-                    service: 'bnb-historical-crawler',
-                    status: 'healthy',
-                    stats: historicalService.getStats(),
-                    timestamp: new Date().toISOString()
-                }));
+                try {
+                    const stats = historicalService.getStats();
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        service: 'bnb-historical-crawler',
+                        status: 'healthy',
+                        stats: stats,
+                        timestamp: new Date().toISOString(),
+                        uptime: process.uptime()
+                    }));
+                } catch (error) {
+                    console.error('健康检查错误:', error);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        service: 'bnb-historical-crawler',
+                        status: 'error',
+                        error: error.message,
+                        timestamp: new Date().toISOString()
+                    }));
+                }
+            } else if (req.url === '/' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'text/plain' });
+                res.end('BNB Historical Crawler Service - OK');
             } else {
                 res.writeHead(404);
                 res.end('Not Found');
@@ -597,6 +613,10 @@ if (require.main === module) {
         httpServer.listen(PORT, '0.0.0.0', () => {
             console.log(`🩺 健康檢查服務運行在端口 ${PORT}`);
             console.log(`📊 健康檢查端點: http://localhost:${PORT}/health`);
+        });
+
+        httpServer.on('error', (error) => {
+            console.error('HTTP服务器错误:', error);
         });
     }
     
@@ -631,21 +651,43 @@ if (require.main === module) {
     async function startHistoricalService() {
         try {
             console.log('📊 獨立歷史數據服務啟動中...');
-            await historicalService.initialize();
-            historicalService.start();
+            
+            // 先启动健康检查服务器
             createHealthCheckServer();
-            console.log('✅ 獨立歷史數據服務已啟動');
-            console.log('🎯 專門處理歷史數據回補和補齊');
+            console.log('🩺 健康检查服务已启动');
+            
+            // 检查必需的环境变量
+            if (!process.env.DATABASE_URL) {
+                console.warn('⚠️ DATABASE_URL 未设置，历史数据功能将受限');
+            }
+            if (!process.env.CONTRACT_ADDRESS) {
+                console.warn('⚠️ CONTRACT_ADDRESS 未设置，历史数据功能将受限');
+            }
+            
+            // 如果有必需的环境变量，初始化历史服务
+            if (process.env.DATABASE_URL && process.env.CONTRACT_ADDRESS) {
+                await historicalService.initialize();
+                historicalService.start();
+                console.log('✅ 歷史數據服務已啟動');
+                console.log('🎯 專門處理歷史數據回補和補齊');
+            } else {
+                console.log('⏸️ 歷史數據服務暫停，等待環境變量配置');
+            }
             
             // 每30秒輸出統計信息
             setInterval(() => {
-                const stats = historicalService.getStats();
-                console.log(`📈 統計: 處理${stats.roundsProcessed}局, 下注${stats.betsProcessed}筆, 領獎${stats.claimsProcessed}筆, 錯誤${stats.errors}次`);
+                try {
+                    const stats = historicalService.getStats();
+                    console.log(`📈 統計: 處理${stats.roundsProcessed}局, 下注${stats.betsProcessed}筆, 領獎${stats.claimsProcessed}筆, 錯誤${stats.errors}次`);
+                } catch (error) {
+                    console.log(`📈 統計: 服務未完全初始化 - ${error.message}`);
+                }
             }, 30000);
             
         } catch (error) {
-            console.error('💥 歷史數據服務啟動失敗:', error);
-            process.exit(1);
+            console.error('💥 服務啟動失敗:', error);
+            // 不要立即退出，保持健康检查服务运行
+            console.log('🩺 健康检查服务仍在运行');
         }
     }
 
