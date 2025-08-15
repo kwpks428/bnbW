@@ -318,7 +318,11 @@ class ConnectionManager {
     }
 
     async getDatabaseConnection() {
-        console.log(`🔍 [ConnectionManager] getDatabaseConnection - dbPool: ${!!this.connections.dbPool}, dbConnected: ${this.status.dbConnected}`);
+        // 减少日志输出，只在状态变化时记录
+        const needsDebugLog = process.env.NODE_ENV === 'development' || !this.status.dbConnected;
+        if (needsDebugLog) {
+            console.log(`🔍 [ConnectionManager] getDatabaseConnection - dbPool: ${!!this.connections.dbPool}, dbConnected: ${this.status.dbConnected}`);
+        }
         
         // 如果資料庫連接池不存在或連接狀態為 false，嘗試重新初始化
         if (!this.connections.dbPool || !this.status.dbConnected) {
@@ -336,7 +340,10 @@ class ConnectionManager {
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
                 const client = await this.connections.dbPool.connect();
-                console.log(`✅ [ConnectionManager] 成功獲取資料庫連接 (嘗試 ${attempt}/3)`);
+                // 只在第一次尝试失败后记录成功日志
+                if (attempt > 1 || needsDebugLog) {
+                    console.log(`✅ [ConnectionManager] 成功獲取資料庫連接 (嘗試 ${attempt}/3)`);
+                }
                 return client;
             } catch (error) {
                 console.error(`❌ [ConnectionManager] 獲取資料庫連接失敗 (嘗試 ${attempt}/3):`, error.message);

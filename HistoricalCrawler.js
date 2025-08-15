@@ -93,7 +93,10 @@ class HistoricalCrawler {
             
             while (!this.mainLine.shouldStop && checkEpoch > 0) {
                 if (!(await this.hasRoundData(checkEpoch))) {
-                    console.log(`🔄 [主線] 處理局次 ${checkEpoch}`);
+                    // 减少处理日志频率，每10次记录一次
+                    if (processedCount % 10 === 0 || processedCount < 5) {
+                        console.log(`🔄 [主線] 處理局次 ${checkEpoch}`);
+                    }
                     await this.processEpoch(checkEpoch);
                     processedCount++;
                     await this.delay(2000);
@@ -182,7 +185,11 @@ class HistoricalCrawler {
     // 處理單個局次
     async processEpoch(epoch) {
         try {
-            console.log(`🔄 Processing epoch ${epoch}...`);
+            // 减少详细处理日志，只在错误或重要事件时记录
+            const isVerbose = process.env.LOG_LEVEL === 'verbose' || epoch % 100 === 0;
+            if (isVerbose) {
+                console.log(`🔄 Processing epoch ${epoch}...`);
+            }
             
             if (await this.shouldSkipEpoch(epoch)) {
                 console.log(`⏭️ Skipping epoch ${epoch} due to too many failures.`);
@@ -191,7 +198,9 @@ class HistoricalCrawler {
 
             const roundData = await this.getRoundData(epoch);
             if (!roundData) {
-                console.log(`⏭️ Epoch ${epoch} is not finished or data is invalid.`);
+                if (isVerbose) {
+                    console.log(`⏭️ Epoch ${epoch} is not finished or data is invalid.`);
+                }
                 return false;
             }
 
