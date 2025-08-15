@@ -1,5 +1,6 @@
 const { ethers } = require('ethers');
 const WebSocket = require('ws');
+const http = require('http');
 const ConnectionManager = require('./ConnectionManager');
 const TimeService = require('./TimeService');
 
@@ -51,7 +52,7 @@ class RealtimeListener {
 
     async initialize() {
         try {
-            console.log('🔄 初始化即時數據監聽器...');
+            console.log('⚡ 初始化獨立即時數據服務...');
             await this.connectionManager.initialize();
             
             // 設置 WebSocket 重連回調
@@ -62,11 +63,12 @@ class RealtimeListener {
             
             this.provider = this.connectionManager.getWebSocketProvider();
             this.contract = this.connectionManager.getWebSocketContract();
+            this.createHttpServer();
             this.initializeWebSocketServer();
             this.setupBlockchainEvents();
-            console.log('🚀 即時數據監聽器初始化成功');
+            console.log('🚀 獨立即時數據服務初始化成功');
         } catch (error) {
-            console.error('❌ 即時數據監聽器初始化失敗:', error);
+            console.error('❌ 獨立即時數據服務初始化失敗:', error);
             throw error;
         }
     }
@@ -92,22 +94,65 @@ class RealtimeListener {
         }
     }
 
+    createHttpServer() {
+        const PORT = process.env.REALTIME_PORT || 8080;
+        
+        this.server = http.createServer((req, res) => {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+            
+            if (req.method === 'OPTIONS') {
+                res.writeHead(200);
+                res.end();
+                return;
+            }
+            
+            if (req.url === '/status' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    service: 'realtime-data',
+                    status: this.getStatus(),
+                    timestamp: new Date().toISOString()
+                }));
+            } else {
+                res.writeHead(404);
+                res.end('Not Found');
+            }
+        });
+        
+        this.server.listen(PORT, '0.0.0.0', () => {
+            console.log(`⚡ 即時數據服務運行在端口 ${PORT}`);
+            console.log(`📊 狀態端點: http://localhost:${PORT}/status`);
+            console.log(`🔌 WebSocket端點: ws://localhost:${PORT}/ws`);
+        });
+    }
+
     initializeWebSocketServer() {
         if (!this.server) {
-            console.error('❌ HTTP server instance not provided to RealtimeListener.');
+            console.error('❌ HTTP server instance not created.');
             return;
         }
         this.wss = new WebSocket.Server({ server: this.server, path: '/ws' });
 
         this.wss.on('connection', (ws) => {
-            console.log('🔗 New frontend client connected.');
+            console.log('🔗 前端客戶端已連接');
             this.connectedClients.add(ws);
+            
+            // 發送連接確認
+            ws.send(JSON.stringify({
+                type: 'connection',
+                status: 'connected',
+                timestamp: Date.now()
+            }));
+            
             ws.on('close', () => {
-                console.log('🔌 Frontend client disconnected.');
+                console.log('🔌 前端客戶端已斷線');
                 this.connectedClients.delete(ws);
             });
+            
             ws.on('error', (error) => {
-                console.error('❌ WebSocket client error:', error);
+                console.error('❌ WebSocket 客戶端錯誤:', error);
                 this.connectedClients.delete(ws);
             });
         });
@@ -215,7 +260,7 @@ class RealtimeListener {
             betData.epoch
         );
 
-        // 廣播到前端客戶端
+        // 🚀 優化：立即廣播到前端（最高優先級，降低延遲）
         this.broadcastToClients({ 
             channel: 'new_bet_data', 
             data: { 
@@ -224,30 +269,32 @@ class RealtimeListener {
             } 
         });
 
-        // 保存到 realbet 表
-        try {
-            await this.connectionManager.executeQuery(
-                `INSERT INTO realbet (epoch, bet_ts, wallet_address, bet_direction, amount) 
-                 VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (epoch, wallet_address) DO UPDATE SET
-                 bet_ts = EXCLUDED.bet_ts,
-                 bet_direction = EXCLUDED.bet_direction,
-                 amount = EXCLUDED.amount`,
-                [betData.epoch, betData.bet_ts, betData.wallet_address, betData.bet_direction, betData.amount]
-            );
-            
-            console.log(`💰 [即時] ${direction} 下注: ${betData.wallet_address} ${betData.amount} BNB (局次 ${betData.epoch})`);
-            
-            if (suspiciousCheck.isSuspicious) {
-                console.log(`🚨 [即時] 可疑行為檢測: ${betData.wallet_address} - ${suspiciousCheck.flags.join(', ')}`);
+        console.log(`⚡ [即時廣播] ${direction} 下注: ${betData.wallet_address} ${betData.amount} BNB (局次 ${betData.epoch})`);
+
+        // 🔄 異步保存到數據庫（不阻塞廣播）
+        setImmediate(async () => {
+            try {
+                await this.connectionManager.executeQuery(
+                    `INSERT INTO realbet (epoch, bet_ts, wallet_address, bet_direction, amount) 
+                     VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT (epoch, wallet_address) DO UPDATE SET
+                     bet_ts = EXCLUDED.bet_ts,
+                     bet_direction = EXCLUDED.bet_direction,
+                     amount = EXCLUDED.amount`,
+                    [betData.epoch, betData.bet_ts, betData.wallet_address, betData.bet_direction, betData.amount]
+                );
+                
+                if (suspiciousCheck.isSuspicious) {
+                    console.log(`🚨 [數據庫] 可疑行為記錄: ${betData.wallet_address} - ${suspiciousCheck.flags.join(', ')}`);
+                }
+            } catch (error) {
+                if (error.code === '23505') { // 唯一性約束違反
+                    console.log(`⚠️ [數據庫] 錢包 ${betData.wallet_address} 在局次 ${betData.epoch} 已有記錄`);
+                } else {
+                    console.error('❌ 數據庫寫入失敗:', error);
+                }
             }
-        } catch (error) {
-            if (error.code === '23505') { // 唯一性約束違反
-                console.log(`⚠️ [即時] 錢包 ${betData.wallet_address} 在局次 ${betData.epoch} 已有下注記錄，更新數據`);
-            } else {
-                console.error('❌ Failed to save real-time bet to database:', error);
-            }
-        }
+        });
     }
 
     // 清理過期的處理記錄
@@ -309,8 +356,40 @@ class RealtimeListener {
 
     stop() {
         this.cleanup();
+        if (this.server) {
+            this.server.close(() => {
+                console.log('🛑 HTTP 服務器已關閉');
+            });
+        }
         console.log('🛑 即時數據監聽器已停止');
     }
+}
+
+// 獨立啟動邏輯
+if (require.main === module) {
+    const realtimeService = new RealtimeListener();
+    
+    // 優雅關閉處理
+    process.on('SIGINT', () => {
+        console.log('🛑 收到關閉信號，正在停止即時數據服務...');
+        realtimeService.stop();
+        process.exit(0);
+    });
+
+    process.on('SIGTERM', () => {
+        console.log('🛑 收到終止信號，正在停止即時數據服務...');
+        realtimeService.stop();
+        process.exit(0);
+    });
+
+    // 啟動服務
+    realtimeService.start().catch(error => {
+        console.error('💥 即時數據服務啟動失敗:', error);
+        process.exit(1);
+    });
+
+    console.log('⚡ 獨立即時數據服務已啟動');
+    console.log('🎯 專門處理區塊鏈事件監聽和 WebSocket 推送');
 }
 
 module.exports = RealtimeListener;

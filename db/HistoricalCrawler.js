@@ -559,4 +559,45 @@ class HistoricalCrawler {
     }
 }
 
+// 獨立啟動邏輯
+if (require.main === module) {
+    const historicalService = new HistoricalCrawler();
+    
+    // 優雅關閉處理
+    process.on('SIGINT', () => {
+        console.log('🛑 收到關閉信號，正在停止歷史數據服務...');
+        historicalService.stop();
+        process.exit(0);
+    });
+
+    process.on('SIGTERM', () => {
+        console.log('🛑 收到終止信號，正在停止歷史數據服務...');
+        historicalService.stop();
+        process.exit(0);
+    });
+
+    // 啟動服務
+    async function startHistoricalService() {
+        try {
+            console.log('📊 獨立歷史數據服務啟動中...');
+            await historicalService.initialize();
+            historicalService.start();
+            console.log('✅ 獨立歷史數據服務已啟動');
+            console.log('🎯 專門處理歷史數據回補和補齊');
+            
+            // 每30秒輸出統計信息
+            setInterval(() => {
+                const stats = historicalService.getStats();
+                console.log(`📈 統計: 處理${stats.roundsProcessed}局, 下注${stats.betsProcessed}筆, 領獎${stats.claimsProcessed}筆, 錯誤${stats.errors}次`);
+            }, 30000);
+            
+        } catch (error) {
+            console.error('💥 歷史數據服務啟動失敗:', error);
+            process.exit(1);
+        }
+    }
+
+    startHistoricalService();
+}
+
 module.exports = HistoricalCrawler;

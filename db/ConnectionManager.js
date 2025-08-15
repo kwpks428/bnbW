@@ -32,12 +32,14 @@ class ConnectionManager {
         this.rpcConfig = {
             httpUrl: process.env.RPC_HTTP_URL,
             wsUrl: process.env.RPC_WS_URL,
+            backupHttpUrls: process.env.RPC_BACKUP_URLS ? process.env.RPC_BACKUP_URLS.split(',') : [],
             backupWsUrls: [],
-            timeout: 30000,
-            retryAttempts: 3,
-            retryDelay: 2000,
+            timeout: 60000,
+            retryAttempts: 5,
+            retryDelay: 3000,
             wsHealthCheckInterval: 30000,
-            wsReconnectDelay: 5000
+            wsReconnectDelay: 5000,
+            currentHttpUrlIndex: 0
         };
 
         this.contractConfig = {
@@ -59,6 +61,7 @@ class ConnectionManager {
             lastHealthCheck: null,
             reconnectAttempts: 0,
             currentWsUrlIndex: 0,
+            currentHttpUrlIndex: 0,
             wsLastActivity: null,
             wsConnectionStartTime: null
         };
@@ -128,20 +131,61 @@ class ConnectionManager {
     }
 
     async initializeHttpProvider() {
-        try {
-            console.log('🌐 [ConnectionManager] 正在初始化 HTTP RPC 提供者...');
-            this.connections.httpProvider = new ethers.JsonRpcProvider(this.rpcConfig.httpUrl, 56, { timeout: this.rpcConfig.timeout, retryLimit: this.rpcConfig.retryAttempts });
-            const network = await this.connections.httpProvider.getNetwork();
-            const blockNumber = await this.connections.httpProvider.getBlockNumber();
-            this.status.httpConnected = true;
-            console.log('✅ [ConnectionManager] HTTP RPC 提供者初始化成功');
-            console.log(`   🌐 Network: ${network.name} (ChainID: ${network.chainId})`);
-            console.log(`   📦 Current block: ${blockNumber}`);
-        } catch (error) {
-            console.error('❌ [ConnectionManager] HTTP RPC 提供者初始化失敗:', error.message);
-            this.status.httpConnected = false;
-            throw error;
+        const allUrls = [this.rpcConfig.httpUrl, ...this.rpcConfig.backupHttpUrls];
+        
+        for (let urlIndex = 0; urlIndex < allUrls.length; urlIndex++) {
+            const currentUrl = allUrls[urlIndex];
+            let attempt = 0;
+            
+            while (attempt < 3) { // 3 attempts per URL
+                try {
+                    attempt++;
+                    console.log(`🌐 [ConnectionManager] 正在初始化 HTTP RPC 提供者... (URL ${urlIndex + 1}/${allUrls.length}, 嘗試 ${attempt}/3)`);
+                    console.log(`   🔗 使用URL: ${currentUrl}`);
+                    
+                    // Create provider with extended timeout and retry configuration
+                    this.connections.httpProvider = new ethers.JsonRpcProvider(
+                        currentUrl, 
+                        56, 
+                        { 
+                            timeout: this.rpcConfig.timeout,
+                            retryLimit: 3,
+                            staticNetwork: true // Use static network to avoid additional network calls
+                        }
+                    );
+                    
+                    // Test the connection with a simple call
+                    const blockNumber = await Promise.race([
+                        this.connections.httpProvider.getBlockNumber(),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Connection timeout')), this.rpcConfig.timeout)
+                        )
+                    ]);
+                    
+                    this.status.httpConnected = true;
+                    this.status.currentHttpUrlIndex = urlIndex;
+                    console.log('✅ [ConnectionManager] HTTP RPC 提供者初始化成功');
+                    console.log(`   📦 Current block: ${blockNumber}`);
+                    console.log(`   🔗 成功連接URL: ${currentUrl}`);
+                    return; // Success, exit all loops
+                    
+                } catch (error) {
+                    console.error(`❌ [ConnectionManager] HTTP RPC 提供者初始化失敗 (URL ${urlIndex + 1}, 嘗試 ${attempt}/3):`, error.message);
+                    this.status.httpConnected = false;
+                    
+                    if (attempt < 3) {
+                        // Wait before retry on same URL
+                        console.log(`⏳ [ConnectionManager] 等待 ${this.rpcConfig.retryDelay}ms 後重試相同URL...`);
+                        await new Promise(resolve => setTimeout(resolve, this.rpcConfig.retryDelay));
+                    }
+                }
+            }
+            
+            console.log(`⚠️ [ConnectionManager] URL ${currentUrl} 失敗，嘗試下一個URL...`);
         }
+        
+        // If we get here, all URLs failed
+        throw new Error(`HTTP RPC provider initialization failed for all ${allUrls.length} URLs`);
     }
 
     async initializeWebSocketProvider() {
@@ -228,6 +272,11 @@ class ConnectionManager {
     getCurrentWebSocketUrl() {
         const allUrls = [this.rpcConfig.wsUrl, ...this.rpcConfig.backupWsUrls];
         return allUrls[this.status.currentWsUrlIndex % allUrls.length];
+    }
+
+    getCurrentHttpUrl() {
+        const allUrls = [this.rpcConfig.httpUrl, ...this.rpcConfig.backupHttpUrls];
+        return allUrls[this.status.currentHttpUrlIndex % allUrls.length];
     }
     
     async handleWebSocketReconnect() {
@@ -475,6 +524,7 @@ class ConnectionManager {
             lastHealthCheck: null, 
             reconnectAttempts: 0,
             currentWsUrlIndex: 0,
+            currentHttpUrlIndex: 0,
             wsLastActivity: null,
             wsConnectionStartTime: null
         };
